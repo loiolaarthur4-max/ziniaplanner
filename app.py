@@ -1,36 +1,74 @@
 import streamlit as st
-from datetime import datetime, timedelta
+from datetime import datetime
+import sqlite3
 import pandas as pd
-import time
 
-# Configuração da página do Streamlit
+# 1. CONFIGURAÇÃO DA PÁGINA
 st.set_page_config(page_title="Zínia - Planejador", page_icon="🌼", layout="centered")
 
 st.title("🌼 Zínia - Sistema de Agendamento")
-st.write("Gerencie os pedidos, orçamentos e prazos de entrega.")
+st.write("Gerencie os pedidos, orçamentos e prazos de entrega com salvamento automático.")
 
-# Inicializa o "banco de dados" na memória do navegador se não existir
-if "pedidos" not in st.session_state:
-    st.session_state.pedidos = []
+# 2. FUNÇÕES DO BANCO DE DADOS (SQLite)
+def conectar_banco():
+    conn = sqlite3.connect('zinia_dados.db')
+    cursor = conn.cursor()
+    # Cria a tabela se ela não existir (Garante que os dados fiquem salvos no PC/Nuvem)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS pedidos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cliente TEXT,
+            arranjo TEXT,
+            orcamento_base REAL,
+            frete REAL,
+            orcamento_total REAL,
+            data_hora TEXT
+        )
+    ''')
+    conn.commit()
+    return conn
 
-# --- FORMULÁRIO PARA ADICIONAR CLIENTE ---
+def salvar_pedido(cliente, arranjo, ob, fr, total, data_hora):
+    conn = conectar_banco()
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO pedidos (cliente, arranjo, orcamento_base, frete, orcamento_total, data_hora)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', (cliente, arranjo, ob, fr, total, data_hora))
+    conn.commit()
+    conn.close()
+
+def listar_pedidos():
+    conn = conectar_banco()
+    # Lê os dados do SQLite e joga direto em um DataFrame do Pandas
+    df = pd.read_sql_query("SELECT * FROM pedidos", conn)
+    conn.close()
+    return df
+
+def deletar_pedido(id_pedido):
+    conn = conectar_banco()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM pedidos WHERE id = ?", (id_pedido,))
+    conn.commit()
+    conn.close()
+
+# 3. FORMULÁRIO PARA ADICIONAR CLIENTE
 st.header("📋 Novo Pedido")
 
 with st.form(key="form_pedido", clear_on_submit=True):
     nome = st.text_input("Nome do Cliente", placeholder="Ex: Clodoaldo")
     arranjo = st.text_input("Nome do Arranjo", placeholder="Ex: Vaso de Zínias Amarelas")
     
+    # Caixas lado a lado: Orçamento do arranjo e Frete
     col1, col2 = st.columns(2)
     with col1:
-        orcamento_base = st.number_input("Orçamento do Arranjo (R$)", min_value=0.0, format="%.2f")
+        orcamento_base = st.number_input("Orçamento do Arranjo (R$)", min_value=0.0, step=1.0, format="%.2f")
     with col2:
-        # Botão/Checkbox "Com Frete"
-        com_frete = st.checkbox("Com Frete?")
+        valor_frete = st.number_input("Valor do Frete (R$)", min_value=0.0, step=1.0, format="%.2f")
     
-    # Se o botão "Com Frete" for marcado, mostra o campo do valor do frete
-    valor_frete = 0.0
-    if com_frete:
-        valor_frete = st.number_input("Valor do Frete (R$)", min_value=0.0, format="%.2f")
+    # Soma automática em tempo real para mostrar na tela
+    orcamento_total = orcamento_base + valor_frete
+    st.write(f"**Cálculo do Orçamento Total:** R$ {orcamento_total:.2f}")
     
     # Campos de Data e Hora de entrega
     col3, col4 = st.columns(2)
@@ -41,41 +79,43 @@ with st.form(key="form_pedido", clear_on_submit=True):
 
     botao_salvar = st.form_submit_button(label="Adicionar Cliente")
 
-# --- LÓGICA AO CLICAR NO BOTÃO ---
+# 4. LÓGICA DE SALVAMENTO
 if botao_salvar:
     if nome and arranjo:
-        # Calcula o orçamento total
-        orcamento_total = orcamento_base + valor_frete
-        
-        # Junta data e hora em um único objeto datetime
+        # Junta data e hora
         data_hora_entrega = datetime.combine(data_entrega, hora_entrega)
+        data_hora_formatada = data_hora_entrega.strftime("%d/%m/%Y às %H:%M")
         
-        # Cria o dicionário do novo pedido
-        novo_pedido = {
-            "Cliente": nome,
-            "Arranjo": arranjo,
-            "Orçamento Total (R$)": f"R$ {orcamento_total:.2f}",
-            "Com Frete": "Sim" if com_frete else "Não",
-            "Data/Hora Entrega": data_hora_entrega.strftime("%d/%m/%Y às %H:%M"),
-            "Status": "Agendado"
-        }
-        
-        # Salva na lista de pedidos
-        st.session_state.pedidos.append(novo_pedido)
-        st.success(f"Pedido de {nome} adicionado com sucesso!")
-        
-        # Alerta visual dos prazos na tela (Cálculo dos alarmes de dias/horas)
-        tempo_restante = data_hora_entrega - datetime.now()
-        if tempo_restante.total_seconds() > 0:
-            st.info(f"⏰ Alarme configurado! Esse pedido deve ser entregue em {tempo_restante.days} dias e {tempo_restante.seconds // 3600} horas.")
+        # Salva permanentemente no arquivo .db
+        salvar_pedido(nome, arranjo, orcamento_base, valor_frete, orcamento_total, data_hora_formatada)
+        st.success(f"Pedido de {nome} salvo permanentemente!")
+        st.rerun() # Atualiza a tela para mostrar o novo pedido
     else:
         st.error("Por favor, preencha o nome do cliente e do arranjo.")
 
-# --- EXIBIÇÃO DOS PEDIDOS ---
+# 5. EXIBIÇÃO E EXCLUSÃO DOS PEDIDOS
 st.header("📑 Pedidos Agendados")
-if st.session_state.pedidos:
-    # Transforma a lista em uma tabela bonita do Streamlit (DataFrame)
-    df = pd.DataFrame(st.session_state.pedidos)
-    st.dataframe(df, use_container_width=True)
+df_pedidos = listar_pedidos()
+
+if not df_pedidos.empty:
+    # Mostra a lista de pedidos com um botão de excluir ao lado de cada um
+    for index, row in df_pedidos.iterrows():
+        # Cria uma linha visual organizada para cada pedido
+        with st.container():
+            col_info, col_btn = st.columns([4, 1])
+            
+            with col_info:
+                st.markdown(f"### 👤 {row['cliente']} — *{row['arranjo']}*")
+                st.write(f"📅 **Entrega:** {row['data_hora']}")
+                st.write(f"💰 **Base:** R$ {row['orcamento_base']:.2f} | 🚚 **Frete:** R$ {row['frete']:.2f} | 💵 **Total:** R$ {row['orcamento_total']:.2f}")
+                st.write("---")
+                
+            with col_btn:
+                # Botão de excluir usando o ID único do banco de dados
+                # O uso de 'key' serve para o Streamlit diferenciar os botões de cada linha
+                if st.button("❌ Excluir", key=f"del_{row['id']}"):
+                    deletar_pedido(row['id'])
+                    st.success("Pedido excluído!")
+                    st.rerun()
 else:
     st.write("Nenhum pedido agendado por enquanto.")
