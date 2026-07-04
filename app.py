@@ -6,8 +6,40 @@ import pandas as pd
 # 1. CONFIGURAÇÃO DA PÁGINA
 st.set_page_config(page_title="Zínia - Planejador", page_icon="🌼", layout="centered")
 
+# --- SISTEMA DE SENHA (LOGIN) ---
+# Inicializa o estado de login se não existir
+if "logado" not in st.session_state:
+    st.session_state.logado = False
+
+# Se não estiver logado, mostra apenas a tela de senha
+if not st.session_state.logado:
+    st.title("🔒 Zínia - Acesso Restrito")
+    st.write("Por favor, digite a senha para acessar o gerenciador.")
+    
+    # Campo de texto que esconde os caracteres (type="password")
+    senha_digitada = st.text_input("Senha", type="password", placeholder="Digite a senha aqui...")
+    botao_entrar = st.button("Entrar")
+    
+    if botao_entrar:
+        if senha_digitada == "olimpia3010":
+            st.session_state.logado = True
+            st.success("Acesso liberado!")
+            st.rerun() # Atualiza a tela para mostrar o sistema
+        else:
+            st.error("Senha incorreta! Tente novamente.")
+            
+    # Interrompe o código aqui para não mostrar o resto do site
+    st.stop()
+
+# --- DAQUI PARA BAIXO SÓ EXECUTA SE ESTIVER LOGADO ---
+
 st.title("🌼 Zínia - Sistema de Agendamento")
 st.write("Gerencie os pedidos, orçamentos e prazos de entrega com salvamento automático.")
+
+# Botão de Logout no topo caso queira fechar o sistema depois
+if st.sidebar.button("🚪 Sair do Sistema"):
+    st.session_state.logado = False
+    st.rerun()
 
 # 2. FUNÇÕES DO BANCO DE DADOS (SQLite)
 def conectar_banco():
@@ -91,7 +123,7 @@ if not alertas_disparados:
 
 st.write("---")
 
-# Criando duas abas para organizar o app: uma para ver/editar e outra para adicionar novos
+# Abas para organizar o app
 aba_visualizar, aba_adicionar = st.tabs(["📑 Pedidos Agendados", "➕ Adicionar Novo Pedido"])
 
 # 3. ABA: ADICIONAR CLIENTE
@@ -133,7 +165,6 @@ with aba_visualizar:
     st.header("📑 Todos os Pedidos")
     df_pedidos = listar_pedidos()
 
-    # Cria uma variável no session_state para saber qual item estamos editando
     if "id_editando" not in st.session_state:
         st.session_state.id_editando = None
 
@@ -148,18 +179,15 @@ with aba_visualizar:
                     st.write(f"💰 **Base:** R$ {row['orcamento_base']:.2f} | 🚚 **Frete:** R$ {row['frete']:.2f} | 💵 **Total:** R$ {row['orcamento_total']:.2f}")
                 
                 with col_botoes:
-                    # Botão para ativar o modo de edição deste ID
                     if st.button("✏️ Editar", key=f"btn_edit_{row['id']}"):
                         st.session_state.id_editando = row['id']
                         st.rerun()
                         
-                    # Botão para excluir
                     if st.button("❌ Excluir", key=f"del_{row['id']}"):
                         deletar_pedido(row['id'])
                         st.success("Pedido excluído!")
                         st.rerun()
                 
-                # SE O USUÁRIO CLICOU EM EDITAR NESTE PRODUTO, MOSTRA O FORMULÁRIO DE EDIÇÃO LOGO ABAIXO DELE
                 if st.session_state.id_editando == row['id']:
                     st.info(f"Modo de Edição: Alterando dados de {row['cliente']}")
                     
@@ -176,7 +204,6 @@ with aba_visualizar:
                         novo_total = novo_ob + novo_fr
                         st.write(f"**Novo Orçamento Total:** R$ {novo_total:.2f}")
                         
-                        # Tenta recuperar as datas antigas para preencher o formulário
                         try:
                             dt_antiga = datetime.strptime(row['data_hora'], "%d/%m/%Y às %H:%M")
                             val_dt = dt_antiga.date()
@@ -195,20 +222,19 @@ with aba_visualizar:
                         with col_salvar_cancelar[0]:
                             btn_atualizar = st.form_submit_button("💾 Salvar Alterações")
                         with col_salvar_cancelar[1]:
-                            btn_cancelar = st.form_submit_button("Cancel")
+                            btn_cancelar = st.form_submit_button("Cancelar")
                             
                         if btn_atualizar:
                             nova_data_hora = datetime.combine(nova_dt, nova_hr)
                             nova_dt_formatada = nova_data_hora.strftime("%d/%m/%Y às %H:%M")
                             
-                            # Atualiza no banco SQLite
                             atualizar_pedido(row['id'], novo_nome, novo_arranjo, novo_ob, novo_fr, novo_total, nova_dt_formatada)
-                            st.success("Pedido atualizado com sucesso!")
-                            st.session_state.id_editando = None # Sai do modo de edição
+                            st.success("Pedido updated!")
+                            st.session_state.id_editando = None
                             st.rerun()
                             
                         if btn_cancelar:
-                            st.session_state.id_editando = None # Cancela e fecha o form
+                            st.session_state.id_editando = None
                             st.rerun()
                 st.write("---")
     else:
